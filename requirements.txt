@@ -1,0 +1,7 @@
+requests
+pandas
+jdatetime
+plotly
+numpy
+scipy
+kaleido

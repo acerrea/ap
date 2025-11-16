@@ -8,32 +8,49 @@ import os
 import numpy as np
 from scipy.stats import norm
 from scipy.optimize import newton
-import sys # برای خروج از برنامه در صورت نبود متغیرهای محیطی
+import sys
 
 # --- (بخش ۱) تنظیمات امن و آماده برای گیت‌هاب ---
-
-# خواندن اطلاعات حساس از متغیرهای محیطی
-# این کار از قرار گرفتن توکن و آیدی در کد جلوگیری می‌کند
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-PROXY_URL = os.getenv('IRANIAN_PROXY_URL') # مثلا: 'http://user:pass@1.2.3.4:8080'
+PROXY_URL = os.getenv('IRANIAN_PROXY_URL')
 
-# بررسی وجود متغیرهای ضروری
 if not BOT_TOKEN or not CHAT_ID:
     print("خطا: متغیرهای محیطی TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID تنظیم نشده‌اند.")
-    print("لطفاً یک فایل .env بسازید و مقادیر را در آن قرار دهید.")
-    sys.exit(1) # خروج از برنامه با کد خطا
+    sys.exit(1)
 
-# تنظیمات پروکسی برای درخواست‌های اینترنتی
 proxies = None
 if PROXY_URL:
-    proxies = {
-        'http': PROXY_URL,
-        'https': PROXY_URL,
-    }
+    proxies = {'http': PROXY_URL, 'https': PROXY_URL}
     print(f"-> در حال استفاده از پروکسی: {PROXY_URL}")
 else:
     print("-> بدون پروکسی.")
+
+# *** جدید: تابع ارسال پیام متنی ساده به تلگرام برای اطلاع‌رسانی خطا ***
+def send_telegram_text_message(message_text, try_without_proxy=False):
+    """یک پیام متنی ساده به تلگرام ارسال می‌کند."""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {'chat_id': CHAT_ID, 'text': message_text, 'parse_mode': 'HTML'}
+    
+    current_proxies = proxies
+    # اگر try_without_proxy فعال باشد، سعی می‌کند بدون پروکسی هم ارسال کند
+    if try_without_proxy:
+        current_proxies = None
+        
+    try:
+        response = requests.post(url, data=data, proxies=current_proxies, timeout=10)
+        response_json = response.json()
+        if response_json.get("ok"):
+            print(" -> پیام اطلاع‌رسانی خطا به تلگرام ارسال شد.")
+        else:
+            # اگر با پروکسی اصلی نشد و قرار بود بدون پروکسی هم تست کنیم
+            if proxies and not try_without_proxy:
+                 print("ارسال پیام خطا با پروکسی ناموفق بود، تلاش مجدد بدون پروکسی...")
+                 send_telegram_text_message(message_text, try_without_proxy=True)
+            else:
+                print(f"ERROR sending text message to Telegram: {response_json.get('description')}")
+    except Exception as e:
+        print(f"An exception occurred while sending text message to Telegram: {e}")
 
 
 def send_to_telegram_api(image_path, caption_text):
@@ -43,7 +60,6 @@ def send_to_telegram_api(image_path, caption_text):
         with open(image_path, 'rb') as photo_file:
             files = {'photo': photo_file}
             data = {'chat_id': CHAT_ID, 'caption': caption_text, 'parse_mode': 'HTML'}
-            # ارسال درخواست با پروکسی
             response = requests.post(url, files=files, data=data, proxies=proxies, timeout=30)
             response_json = response.json()
             if response_json.get("ok"):
@@ -77,6 +93,7 @@ header = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
 url_tse_options = 'https://cdn.tsetmc.com/api/Instrument/GetInstrumentOptionMarketWatch/0'
 
 # --- (بخش ۳) توابع بهینه‌سازی شده بلک-شولز و یونانی‌ها (بدون تغییر) ---
+# ... (کدهای این بخش بدون تغییر باقی می‌مانند) ...
 EPSILON = 1e-9
 
 def calculate_greeks_and_price(S, K, T, r, sigma, option_type='call'):
@@ -113,18 +130,27 @@ def implied_volatility(option_price, S, K, T, r, option_type='call'):
     except (RuntimeError, OverflowError, ValueError):
         return 0.0
 
+
 # --- (بخش ۴) کد اصلی ---
 print("شروع پردازش اطلاعات از TSETMC...")
 try:
-    # دریافت اطلاعات بازار با استفاده از پروکسی (در صورت وجود)
+    # *** جدید: مدیریت خطای اتصال در این بلوک انجام می‌شود ***
     response = requests.get(url_tse_options, headers=header, proxies=proxies, timeout=20)
-    response.raise_for_status() # اگر خطایی (مثل 403 یا 500) رخ دهد، برنامه متوقف می‌شود
+    response.raise_for_status() # اگر خطایی (مثل 403, 500, یا عدم اتصال) رخ دهد، به بلوک except می‌رود
     r = response.text.split('},{')
     print(f"تعداد {len(r)} اختیار معامله دریافت شد.")
+
+# *** جدید: گرفتن خطاهای مربوط به اتصال و پروکسی ***
+except requests.exceptions.ProxyError as e:
+    error_message = f"🚨 **خطا در اتصال به پروکسی** 🚨\n\nپروکسی <code>{PROXY_URL}</code> کار نمی‌کند یا در دسترس نیست.\n\nلطفاً پروکسی را بررسی و اصلاح کنید.\n\n<b>جزئیات خطا:</b>\n<code>{e}</code>"
+    print(f"ERROR: Proxy Error - {e}")
+    send_telegram_text_message(error_message)
+    sys.exit(1) # خروج از برنامه
 except requests.exceptions.RequestException as e:
-    print(f"خطا در دریافت اطلاعات از TSETMC: {e}")
-    print("ممکن است نیاز به پروکسی ایرانی داشته باشید یا سایت در دسترس نباشد.")
-    sys.exit(1)
+    error_message = f"🚨 **خطا در دریافت اطلاعات از TSETMC** 🚨\n\nاتصال به سایت بورس برقرار نشد. ممکن است سایت در دسترس نباشد یا پروکسی شما مشکل داشته باشد.\n\n<b>جزئیات خطا:</b>\n<code>{e}</code>"
+    print(f"ERROR: Could not fetch data from TSETMC - {e}")
+    send_telegram_text_message(error_message)
+    sys.exit(1) # خروج از برنامه
 
 
 main_folder = now1
@@ -133,6 +159,7 @@ os.makedirs(main_folder, exist_ok=True)
 swing_opportunities_folder = os.path.join(main_folder, "Swing_Trading_Opportunities")
 os.makedirs(swing_opportunities_folder, exist_ok=True)
 
+# ... بقیه کد شما بدون تغییر ادامه پیدا می‌کند ...
 for i in r:
     try:
         if '"insCode_C":"' not in i: continue
@@ -173,7 +200,6 @@ for i in r:
         df['Date'] = pd.to_datetime(df['Date'], format='%Y%m%d')
         df['Shamsi_Date'] = df['Date'].apply(lambda x: jdatetime.date.fromgregorian(date=x).strftime('%Y/%m/%d'))
         
-        # ... (بقیه کد شما بدون هیچ تغییری ادامه می‌یابد) ...
         S = gp_nemad_asli; K = geymat_emal; T = roozhaye_bagimande / 365.0; r = 0.30
         option_type = 'call'; sigma_manual = selected_historical_sigma
         greeks_manual = calculate_greeks_and_price(S, K, T, r, sigma_manual, option_type)
@@ -202,6 +228,7 @@ for i in r:
             print(f"SUCCESS: Found potential SWING TRADING opportunity: '{nemad}'")
 
         if is_swing_opportunity:
+            # ... (بقیه کد شما برای تحلیل و ساخت پیام و نمودار بدون تغییر) ...
             days_for_scenario = 3
             T_scenario = max(0, roozhaye_bagimande - days_for_scenario) / 365.0
             S_optimistic = S * 1.05

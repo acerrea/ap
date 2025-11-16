@@ -1,0 +1,40 @@
+name: Run Options Scanner
+
+# این بخش مشخص می‌کند که workflow چه زمانی اجرا شود
+on:
+  # اجرای خودکار در ساعت ۶:۳۰ صبح به وقت UTC (۱۰ صبح ایران) هر روز از شنبه تا چهارشنبه
+  schedule:
+    - cron: '30 6 * * 0-4' # دقیقه ساعت روز-ماه روز-هفته (0=یکشنبه, 4=پنجشنبه)
+  
+  # این خط به شما اجازه می‌دهد که workflow را به صورت دستی هم از طریق تب Actions اجرا کنید
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # اجرا روی یک ماشین مجازی با سیستم‌عامل اوبونتو
+
+    steps:
+      # مرحله ۱: کد شما را از ریپازیتوری دانلود می‌کند
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # مرحله ۲: پایتون را روی ماشین مجازی نصب و تنظیم می‌کند
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10' # می‌توانید نسخه پایتون را تغییر دهید
+
+      # مرحله ۳: پکیج‌های مورد نیاز را از فایل requirements.txt نصب می‌کند
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # مرحله ۴: اسکریپت اصلی پایتون را اجرا می‌کند
+      # در این مرحله، مقادیر Secrets به عنوان متغیرهای محیطی به اسکریپت تزریق می‌شوند
+      - name: Run Python script
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          IRANIAN_PROXY_URL: ${{ secrets.IRANIAN_PROXY_URL }}
+        run: python main.py # فرض می‌کنیم نام فایل پایتون شما main.py است
